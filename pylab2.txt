@@ -1,0 +1,81 @@
+import re
+import csv
+import json
+from collections import defaultdict
+
+# File paths
+log_file = 'access_log.txt'
+url_status_report = 'url_status_report.txt'
+malware_candidates_csv = 'malware_candidates.csv'
+alert_json = 'alert.json'
+summary_report_json = 'summary_report.json'
+blacklist_file = 'thread_feed.html'
+
+# Regex patterns
+log_pattern = r'"(GET|POST)\s+(\S+)\s+HTTP/[0-9.]+"\s+(\d{3})'
+blacklist_pattern = r'<li>(.*?)</li>'
+
+# Data containers
+url_status_map = []
+status_404_counts = defaultdict(int)
+blacklisted_urls = set()
+alerts = []
+
+# Log faylından URL-ləri və status kodlarını çıxarın
+with open(log_file, 'r') as log:
+    for line in log:
+        match = re.search(log_pattern, line)
+        if match:
+            method, url, status_code = match.groups()
+            url_status_map.append((url, status_code))
+            if status_code == '404':
+                status_404_counts[url] += 1
+
+# URL status hesabatını yazın
+with open(url_status_report, 'w') as report:
+    for url, status_code in url_status_map:
+        report.write(f"{url} {status_code}\n")
+
+# Zərərli proqram namizədlərini (404 səhv) CSV-yə yazın
+with open(malware_candidates_csv, 'w', newline='') as csvfile:
+    writer = csv.writer(csvfile)
+    writer.writerow(['URL', '404_Count'])
+    for url, count in status_404_counts.items():
+        writer.writerow([url, count])
+
+# Qara siyahıdakı domenləri çıxarmaq üçün qara siyahı HTML-ni təhlil edin
+with open(blacklist_file, 'r') as blacklist:
+    blacklist_content = blacklist.read()
+    blacklisted_urls.update(re.findall(blacklist_pattern, blacklist_content))
+
+# URL-LƏRLƏ BLACKLİST DOMAİNSLERİN UYGUNLASDİRİLMASİ
+for url, status_code in url_status_map:
+    for blacklisted_domain in blacklisted_urls:
+        if blacklisted_domain in url:
+            alerts.append({
+                'url': url,
+                'status_code': status_code,
+                'blacklisted_domain': blacklisted_domain,
+                'occurrences': status_404_counts.get(url, 0)
+            })
+
+# Alertlərin jsonla yazilmasi
+with open(alert_json, 'w') as alert_file:
+    json.dump(alerts, alert_file, indent=4)
+
+# Nəticələrin təhlili
+summary = {
+    'total_urls': len(url_status_map),
+    'total_404_errors': sum(status_404_counts.values()),
+    'blacklist_matches': len(alerts),
+    'unique_blacklisted_domains': list(blacklisted_urls)
+}
+
+with open(summary_report_json, 'w') as summary_file:
+    json.dump(summary, summary_file, indent=4)
+
+print("Analysis complete. Files generated:")
+print(f"- {url_status_report}")
+print(f"- {malware_candidates_csv}")
+print(f"- {alert_json}")
+print(f"- {summary_report_json}")
